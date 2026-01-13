@@ -1,0 +1,2 @@
+# This file ensures the saves/ directory is tracked by Git
+# Individual save files (*.json) are ignored via .gitignore

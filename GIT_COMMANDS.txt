@@ -1,0 +1,126 @@
+================================================================================
+ECHO OF THE LAST SYSTEM - GIT COMMANDS (COPY-PASTE READY)
+================================================================================
+
+STEP 1: CREATE GITHUB REPOSITORY
+---------------------------------
+1. Go to: https://github.com/new
+2. Repository name: echo-of-the-last-system
+3. Visibility: Public
+4. DO NOT initialize with README (you already have one)
+5. Click "Create repository"
+
+
+STEP 2: INITIALIZE LOCAL REPOSITORY
+------------------------------------
+cd D:\game
+git init
+git branch -M main
+
+
+STEP 3: STAGE AND COMMIT
+-------------------------
+git add .
+git status
+
+# Verify acli.exe is NOT listed (should be ignored)
+# Verify adventure_game/saves/.gitkeep IS listed
+
+git commit -m "Initial release: Echo of the Last System v1.0.0
+
+Complete adventure RPG with CLI and GUI interfaces.
+Includes full source code, documentation, build scripts, and tests."
+
+
+STEP 4: ADD REMOTE AND PUSH
+----------------------------
+# Replace YOUR_USERNAME with your actual GitHub username
+git remote add origin https://github.com/YOUR_USERNAME/echo-of-the-last-system.git
+git push -u origin main
+
+# When prompted:
+# Username: your-github-username
+# Password: your-personal-access-token (NOT your GitHub password)
+
+
+STEP 5: CREATE VERSION TAG
+---------------------------
+git tag -a v1.0.0 -m "Release v1.0.0: Echo of the Last System
+
+First stable release.
+- Five distinct endings
+- Four interface options (CLI, Tkinter, Pygame)
+- Complete documentation and tests
+- Full save/load system"
+
+git push origin v1.0.0
+
+
+STEP 6: CREATE GITHUB RELEASE
+------------------------------
+1. Go to: https://github.com/YOUR_USERNAME/echo-of-the-last-system/releases
+2. Click "Draft a new release"
+3. Choose tag: v1.0.0
+4. Release title: v1.0.0 - Initial Release
+5. Copy description from RELEASE_NOTES.md
+6. Upload these files (build them first):
+   - EchoOfTheLastSystem-GUI.exe
+   - EchoOfTheLastSystem-CLI.exe
+7. Check "Set as the latest release"
+8. Click "Publish release"
+
+
+OPTIONAL: UPDATE README WITH ACTUAL USERNAME
+---------------------------------------------
+# After creating the repository, update this line in README.md:
+# FROM: git clone https://github.com/yourusername/echo-of-the-last-system.git
+# TO:   git clone https://github.com/YOUR_ACTUAL_USERNAME/echo-of-the-last-system.git
+
+# Then commit the change:
+git add README.md
+git commit -m "docs: Update clone URL with actual username"
+git push
+
+
+VERIFICATION COMMANDS
+---------------------
+# Check what will be committed
+git status
+
+# Check what's being ignored
+git status --ignored
+
+# View commit history
+git log --oneline
+
+# Verify remote is set
+git remote -v
+
+
+TROUBLESHOOTING
+---------------
+# If you accidentally staged acli.exe:
+git reset HEAD acli.exe
+
+# If you need to undo last commit (before pushing):
+git reset --soft HEAD~1
+
+# If .gitignore isn't working:
+git rm -r --cached .
+git add .
+git commit -m "Fix .gitignore"
+
+
+PERSONAL ACCESS TOKEN
+---------------------
+If you don't have one:
+1. GitHub → Settings → Developer settings → Personal access tokens
+2. Tokens (classic) → Generate new token
+3. Select scope: repo (full control of private repositories)
+4. Generate token
+5. SAVE IT SECURELY (you can't see it again)
+
+
+================================================================================
+READY TO PUBLISH!
+================================================================================

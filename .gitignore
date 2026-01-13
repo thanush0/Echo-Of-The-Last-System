@@ -1,0 +1,112 @@
+# ==========================================
+# Echo of the Last System - .gitignore
+# ==========================================
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.so
+.Python
+
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+*.exe
+*.app
+*.dmg
+
+# Distribution and packaging
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv/
+virtualenv/
+.virtualenvs/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-project
+*.sublime-workspace
+.project
+.pydevproject
+.settings/
+
+# Save files (keep directory, ignore contents)
+adventure_game/saves/*.json
+adventure_game/saves/*.sav
+adventure_game/saves/*.dat
+
+# Logs and debugging
+*.log
+*.log.*
+debug.log
+error.log
+
+# OS-specific files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Thumbs.db:encryptable
+desktop.ini
+$RECYCLE.BIN/
+
+# Temporary files
+tmp_*
+temp_*
+*.tmp
+*.bak
+*.swp
+*~.nib
+
+# Test coverage and reports
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.pytest_cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Build scripts output
+build.log
+pyinstaller.log
