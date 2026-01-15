@@ -203,4 +203,4 @@ For issues, questions, or contributions, please open an issue on GitHub.
 
 ---
 
-**"You are Unknown because you refused to be Known."** — The Oracle
+**"You are Unknown because you refused to be Known."** — The Oracle.
