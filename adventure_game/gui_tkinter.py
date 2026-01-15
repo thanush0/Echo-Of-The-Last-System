@@ -7,15 +7,34 @@ import tkinter as tk
 from tkinter import scrolledtext, messagebox, ttk
 import random
 import threading
+from typing import Optional
 
-# Import game logic
-from player import Player
-from system import SystemAI
-from world import World
-from dialogue import DialogueManager
-from quests import QuestManager, create_main_quest
-from save_load import SaveLoadManager
-from enemies import get_random_enemy
+# UI-only enhancements (do not affect core game logic)
+# Support both running as a script (imports from working directory) and as a package.
+try:
+    from .asset_manager import get_asset_manager
+    from .voice_system import get_voice_system, Speaker
+
+    # Import game logic
+    from .player import Player
+    from .system import SystemAI
+    from .world import World
+    from .dialogue import DialogueManager
+    from .quests import QuestManager, create_main_quest
+    from .save_load import SaveLoadManager
+    from .enemies import get_random_enemy
+except ImportError:  # pragma: no cover
+    from asset_manager import get_asset_manager
+    from voice_system import get_voice_system, Speaker
+
+    # Import game logic
+    from player import Player
+    from system import SystemAI
+    from world import World
+    from dialogue import DialogueManager
+    from quests import QuestManager, create_main_quest
+    from save_load import SaveLoadManager
+    from enemies import get_random_enemy
 
 
 # Color scheme - Dark/Glitch aesthetic
@@ -38,32 +57,51 @@ COLORS = {
 
 
 class TkinterSystemAI(SystemAI):
-    """System AI adapted for Tkinter"""
-    
-    def __init__(self, text_widget):
+    """System AI adapted for Tkinter.
+
+    IMPORTANT:
+    - Still uses the same core logic from `SystemAI`.
+    - We only layer optional voice output and route messages to the Tkinter widget.
+    """
+
+    def __init__(self, text_widget, voice_system=None):
         super().__init__()
         self.text_widget = text_widget
+        self.voice = voice_system
     
     def message(self, text, delay=0, glitch_override=None):
-        """Display system message in GUI"""
+        """Display system message in GUI (and optionally speak it)."""
         should_glitch = glitch_override if glitch_override is not None else self._should_glitch()
-        
+
         if should_glitch:
             text = self._glitch_text(text)
-        
-        self._insert_text(f"[SYSTEM] {text}\n", COLORS['fg'])
+
+        rendered = f"[SYSTEM] {text}\n"
+        self._insert_text(rendered, COLORS['fg'])
+
+        # Optional voice (UI layer only)
+        if self.voice is not None and self.voice.is_enabled():
+            self.voice.speak(text, Speaker.SYSTEM)
+
         self.messages_sent += 1
     
     def error_message(self, text, error_code=None):
-        """Display error message"""
+        """Display error message (and optionally speak it)."""
         if error_code is None:
             error_code = random.randint(1000, 9999)
-        
+
         self._insert_text(f"[SYSTEM ERROR {error_code}] {text}\n", COLORS['error'])
+
+        if self.voice is not None and self.voice.is_enabled():
+            # Keep error codes out of speech for clarity
+            self.voice.speak(text, Speaker.SYSTEM)
     
     def warning(self, text):
-        """Display warning"""
+        """Display warning (and optionally speak it)."""
         self._insert_text(f"[SYSTEM WARNING] {text}\n", COLORS['warning'])
+
+        if self.voice is not None and self.voice.is_enabled():
+            self.voice.speak(text, Speaker.SYSTEM)
     
     def _insert_text(self, text, color):
         """Insert colored text into widget"""
@@ -76,7 +114,391 @@ class TkinterSystemAI(SystemAI):
 
 class GameGUITkinter:
     """Main Tkinter GUI"""
-    
+
+    # -----------------------------
+    # NPC / Dialogue (GUI-native)
+    # -----------------------------
+    def _enter_dialogue_mode(self):
+        """Disable main actions while in a dialogue."""
+        self._in_dialogue = True
+        self.clear_buttons()
+
+    def _exit_dialogue_mode(self):
+        """Return to the main game actions."""
+        self._in_dialogue = False
+        self.show_main_game()
+
+    def _render_oracle_line(self, text: str):
+        # Portrait + voice + formatted output
+        self.show_character_image("oracle", "The Oracle")
+        self.insert_text(f"The Oracle: \"{text}\"\n", COLORS['glitch2'], speaker=Speaker.ORACLE)
+
+    def _render_player_line(self, text: str):
+        # Player portrait asset is currently shipped as `unknown_player.png`
+        self.show_character_image("unknown_player", self.player.name if self.player else "")
+        self.insert_text(f"You: {text}\n", COLORS['fg'], speaker=Speaker.PLAYER)
+
+    def handle_npc_encounter(self, npc_id: Optional[str]):
+        """Handle NPC encounter events from the world system."""
+        if not npc_id:
+            return
+
+        if npc_id != "oracle":
+            self.insert_text(f"\nAn unknown entity ({npc_id}) flickers at the edge of your vision...\n", COLORS['warning'])
+            return
+
+        # Oracle encounter: GUI-native version (dialogue.py is CLI/input-based).
+        self._enter_dialogue_mode()
+        self.update_scene_image("anomaly_event")
+        self.show_character_image("oracle", "The Oracle")
+
+        # Determine which dialogue to show based on player/npc state.
+        # dialogue.py increments interactions on NPC.interact(); we keep a parallel counter in GUI.
+        npc_state = {}
+        try:
+            if self.dialogue_manager is not None:
+                npc_state = self.dialogue_manager.get_npc_state().get("oracle", {})
+        except Exception:
+            npc_state = {}
+
+        interactions = int(npc_state.get("interactions", 0))
+        # Next interaction number if we were to call NPC.interact()
+        next_interaction = interactions + 1
+
+        # Branch
+        if next_interaction == 1:
+            self._oracle_first_meeting()
+        elif next_interaction == 2:
+            self._oracle_second_meeting()
+        elif self.player and self.player.get_story_flag("found_core_fragment"):
+            self._oracle_post_fragment_dialogue()
+        else:
+            self._oracle_generic_dialogue()
+
+        # Update interactions count in dialogue_manager state (best effort)
+        try:
+            if self.dialogue_manager is not None:
+                state = self.dialogue_manager.get_npc_state()
+                if "oracle" in state:
+                    state["oracle"]["interactions"] = next_interaction
+                    self.dialogue_manager.set_npc_state(state)
+        except Exception:
+            pass
+
+    def _oracle_first_meeting(self):
+        self.insert_text("\n" + "="*50 + "\n", COLORS['fg'])
+        self.insert_text("  A FIGURE EMERGES FROM THE STATIC\n", COLORS['glitch2'])
+        self.insert_text("="*50 + "\n\n", COLORS['fg'])
+
+        self.insert_text(
+            "A figure materializes before you, their form flickering between solid and transparent, real and unreal.\n\n",
+            COLORS['fg'],
+            speaker=Speaker.NARRATOR,
+        )
+
+        # Oracle speaks
+        self._render_oracle_line(f"Hello, {self.player.name}.")
+        self.insert_text("\nYou freeze. How do they know your name?\n", COLORS['fg'], speaker=Speaker.NARRATOR)
+        self.insert_text("You don't even know your own name.\n\n", COLORS['fg'], speaker=Speaker.NARRATOR)
+
+        self.system_ai.error_message("WARNING: Unregistered entity detected. Identity: UNKNOWN.")
+
+        self._render_oracle_line(
+            "The System calls you 'Unknown' because it fears what you might become if you remembered who you are."
+        )
+        self._render_oracle_line(
+            "I am the Oracle. I remember what the System forgets. I have watched 10,391 others fail. You will be different."
+        )
+        self._render_oracle_line("...Or so I hope. Hope is all I have left.")
+
+        self.insert_text("\nHow do you respond?\n", COLORS['fg'])
+
+        choices = [
+            "How do you know my name?",
+            "What happened to the others?",
+            "Why should I trust you?",
+            "Tell me the truth about this world.",
+            "[Remain silent]",
+        ]
+
+        for i, label in enumerate(choices, start=1):
+            self.insert_text(f"  {i}. {label}\n", COLORS['fg_dim'])
+
+        # Render choice buttons
+        self.clear_buttons()
+        for i, label in enumerate(choices, start=1):
+            self.add_button(
+                f"{i}. {label}",
+                command=lambda c=i: self._oracle_first_meeting_choice(c),
+                row=i - 1,
+                colspan=2,
+            )
+
+    def _oracle_first_meeting_choice(self, choice: int):
+        self.clear_buttons()
+
+        if choice == 1:
+            self._render_player_line("How do you know my name?")
+            self._render_oracle_line(
+                "I was there when you chose to forget it. The System wipes memories, but I remember everything."
+            )
+            self._render_oracle_line(
+                "Every cycle. Every failure. Every death. Your name is a weapon against fate."
+            )
+            self._render_oracle_line("But I will not give it to you freely. You must earn the right to be Known.")
+            self.player.increase_stat_by_action("intelligence", 2)
+        elif choice == 2:
+            self._render_player_line("What happened to the others?")
+            self._render_oracle_line(
+                "They trusted the System. They believed it could be restored. They collected the Core Fragments, thinking they could save the world."
+            )
+            self._render_oracle_line(
+                "But the System does not want to be saved. It wants to perpetuate. To loop. To trap."
+            )
+            self._render_oracle_line("They became part of the System. Forever.")
+            self.insert_text("\nThe Oracle's eyes flicker with something like grief.\n\n", COLORS['fg'], speaker=Speaker.NARRATOR)
+            self.player.increase_stat_by_action("intelligence", 2)
+            self.player.set_story_flag("learned_others_fate", True)
+        elif choice == 3:
+            self._render_player_line("Why should I trust you?")
+            self._render_oracle_line("You shouldn't. Trust is for those who have the luxury of time.")
+            self._render_oracle_line(
+                "You have only choices. I offer knowledge. What you do with it determines who you become."
+            )
+            self._render_oracle_line(
+                "Trust, or don't. But know this: The System will lie to you. I, at least, tell you I might lie."
+            )
+            self.player.increase_stat_by_action("intelligence", 1)
+            self.system_ai.message("WARNING: Oracle entity exhibits anomalous truth-value patterns.")
+        elif choice == 4:
+            self._render_player_line("Tell me the truth about this world.")
+            self._render_oracle_line("The truth?")
+            self.insert_text("\nThe Oracle laughs, a sound like breaking glass.\n\n", COLORS['fg'], speaker=Speaker.NARRATOR)
+            self._render_oracle_line(
+                "This world is already dead. You are walking through its corpse. The System is the parasitic ghost that cannot let go."
+            )
+            self._render_oracle_line(
+                "And you... you are the antibody it cannot digest. That is why you keep coming back."
+            )
+            self._render_oracle_line(
+                "That is why you are Unknown. That is why you might succeed where others failed."
+            )
+            self.insert_text("\nYour corruption level increases, but so does your understanding.\n\n", COLORS['fg'], speaker=Speaker.NARRATOR)
+            self.player.increase_stat_by_action("intelligence", 3)
+            self.player.corruption_level += 10
+            self.player.set_story_flag("learned_truth", True)
+            self.system_ai.warning("TRUTH CONTAMINATION DETECTED. QUARANTINE FAILED.")
+        else:
+            self._render_player_line("...")
+            self.insert_text("\nYou say nothing. The Oracle nods approvingly.\n", COLORS['fg'], speaker=Speaker.NARRATOR)
+            self._render_oracle_line(
+                "Wise. Words are traps in this place. Even mine. Especially mine. Silence is its own answer."
+            )
+            self._render_oracle_line("Perhaps the truest one.")
+            self.player.increase_stat_by_action("luck", 2)
+
+        # Set story flags (match dialogue.py behavior)
+        self.player.set_story_flag("met_oracle", True)
+
+        self.add_button("CONTINUE", self._exit_dialogue_mode, 0, colspan=2)
+
+    def _oracle_second_meeting(self):
+        self.insert_text("\n", COLORS['fg'])
+        self._render_oracle_line("You're still alive. Good. The System must be getting frustrated.")
+        self._render_oracle_line("Have you found any Core Fragments yet?")
+
+        if self.player and self.player.has_item("System Fragment"):
+            self.insert_text("\nYou show the Oracle your System Fragments.\n\n", COLORS['fg'], speaker=Speaker.NARRATOR)
+            self._render_oracle_line(
+                "Ah. You're collecting them. Be careful. Each fragment you collect binds you more to the System."
+            )
+            self._render_oracle_line("But they also grant power over reality itself. The choice, as always, is yours.")
+            self.player.increase_stat_by_action("intelligence", 1)
+        else:
+            self._render_oracle_line(
+                "Not yet. Good. Or bad. Time will tell. The fragments are scattered across the ruins."
+            )
+            self._render_oracle_line(
+                "Hidden in places where reality is thinnest. When you're ready to face your fate... seek them out."
+            )
+
+        self.add_button("CONTINUE", self._exit_dialogue_mode, 0, colspan=2)
+
+    def _oracle_post_fragment_dialogue(self):
+        self.insert_text("\n", COLORS['fg'])
+        self._render_oracle_line(
+            "You found it. The first Core Fragment. Can you feel it? The System's grip tightening?"
+        )
+        self._render_oracle_line(
+            "But also... the power. The ability to reshape this dead world. What will you do with such power, I wonder?"
+        )
+
+        choices = [
+            "I'll restore the System and save this world.",
+            "I'll destroy the System and end this cycle.",
+            "I don't know yet.",
+            "None of your business.",
+        ]
+        self.insert_text("\n", COLORS['fg'])
+        for i, label in enumerate(choices, start=1):
+            self.insert_text(f"  {i}. {label}\n", COLORS['fg_dim'])
+
+        self.clear_buttons()
+        for i, label in enumerate(choices, start=1):
+            self.add_button(
+                f"{i}. {label}",
+                command=lambda c=i: self._oracle_post_fragment_choice(c),
+                row=i - 1,
+                colspan=2,
+            )
+
+    def _oracle_post_fragment_choice(self, choice: int):
+        self.clear_buttons()
+
+        if choice == 1:
+            self._render_player_line("I'll restore the System and save this world.")
+            self._render_oracle_line("The hero's path. Noble. Doomed.")
+            self._render_oracle_line("But perhaps you'll prove me wrong. 10,392nd time's the charm?")
+            self.player.set_story_flag("path_restoration", True)
+        elif choice == 2:
+            self._render_player_line("I'll destroy the System and end this cycle.")
+            self._render_oracle_line("The destroyer's path. Dangerous. Liberating.")
+            self._render_oracle_line(
+                "If you succeed, everything ends. Including me. But at least it would be a true ending."
+            )
+            self.player.set_story_flag("path_destruction", True)
+        elif choice == 3:
+            self._render_player_line("I don't know yet.")
+            self._render_oracle_line("Uncertainty. The only honest answer in this place.")
+            self._render_oracle_line("Hold onto that uncertainty. It's your freedom.")
+            self.player.increase_stat_by_action("luck", 1)
+        else:
+            self._render_player_line("None of your business.")
+            self._render_oracle_line("Fair enough. Your choices are yours alone. I merely observe. And hope.")
+
+        self.add_button("CONTINUE", self._exit_dialogue_mode, 0, colspan=2)
+
+    def _oracle_generic_dialogue(self):
+        dialogues = [
+            "The System watches you more closely now. Be careful.",
+            "Reality grows thinner with each passing moment. Can you feel it?",
+            "I wonder if you'll be the one to break the cycle. Or just another iteration.",
+            "The ruins hold many secrets. Not all of them are safe to know.",
+            "Your corruption level rises. Is it a curse? Or evolution?",
+        ]
+        self.insert_text("\n", COLORS['fg'])
+        self._render_oracle_line(random.choice(dialogues))
+        self.add_button("CONTINUE", self._exit_dialogue_mode, 0, colspan=2)
+
+    # -----------------------------
+    # UI Enhancement Helpers
+    # -----------------------------
+    def speak(self, text: str, speaker: Speaker = Speaker.NARRATOR):
+        """Speak text via offline TTS (optional).
+
+        This is UI-only and never required for gameplay.
+        """
+        try:
+            if self.voice is not None and self.voice.is_enabled():
+                self.voice.speak(text, speaker)
+        except Exception:
+            # Never let voice errors break the game.
+            pass
+
+    def _on_voice_toggle(self):
+        """Handle UI toggle for voice narration."""
+        enabled = bool(self.voice_enabled_var.get())
+        if self.voice is not None:
+            self.voice.set_enabled(enabled)
+            if not enabled:
+                self.voice.stop()
+
+    def update_scene_image(self, scene_key: Optional[str]):
+        """Update the scene image based on a scene key.
+
+        Scene keys map to files under `assets/scenes/`.
+        Fallback: clears image if missing.
+        """
+        self.current_scene_key = scene_key
+
+        if not scene_key:
+            self.scene_image_label.config(image='')
+            self._scene_photo = None
+            return
+
+        # Size based on UI layout (conservative defaults)
+        size = (780, 240)
+        photo = self.assets.get_scene_image(scene_key, size=size)
+
+        if photo is None:
+            # Missing asset: clear gracefully.
+            self.scene_image_label.config(image='')
+            self._scene_photo = None
+            return
+
+        self._scene_photo = photo
+        self.scene_image_label.config(image=self._scene_photo)
+
+    def show_character_image(self, character_key: Optional[str], display_name: str = ""):
+        """Show a character portrait.
+
+        Character keys map to files under `assets/characters/`.
+        Fallback: clears portrait if missing.
+        """
+        self.current_portrait_key = character_key
+        self.portrait_name_label.config(text=display_name or "")
+
+        if not character_key:
+            self.portrait_image_label.config(image='')
+            self._portrait_photo = None
+            return
+
+        size = (96, 96)
+        photo = self.assets.get_character_image(character_key, size=size)
+
+        if photo is None:
+            self.portrait_image_label.config(image='')
+            self._portrait_photo = None
+            return
+
+        self._portrait_photo = photo
+        self.portrait_image_label.config(image=self._portrait_photo)
+
+    def _set_default_images_for_state(self):
+        """Best-effort mapping from game state to images."""
+        if self.in_combat and self.current_enemy is not None:
+            self.update_scene_image("combat_generic")
+            # Enemies can be provided either in characters/ or enemies/; we use characters for portraits.
+            # This keeps the portrait API simple.
+            self.show_character_image(self._enemy_key(self.current_enemy.name), self.current_enemy.name)
+            return
+
+        # Not in combat: show location scene.
+        if self.world is not None:
+            self.update_scene_image(self._area_to_scene_key(self.world.current_area))
+        else:
+            self.update_scene_image(None)
+
+        # No active speaker
+        self.show_character_image(None, "")
+
+    @staticmethod
+    def _area_to_scene_key(area_name: str) -> str:
+        """Map world area names to scene asset keys."""
+        mapping = {
+            "The Forgotten Ruins": "system_stable",
+            "Nexus Hub": "nexus_hub",
+            "Data Crypt": "data_crypt",
+            "Memory Canyon": "memory_canyon",
+            "Core Chamber": "core_chamber",
+        }
+        return mapping.get(area_name, "system_stable")
+
+    @staticmethod
+    def _enemy_key(enemy_name: str) -> str:
+        """Normalize enemy name to an asset key."""
+        return enemy_name.lower().replace(" ", "_").replace("-", "_")
+
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("ECHO OF THE LAST SYSTEM")
@@ -85,6 +507,7 @@ class GameGUITkinter:
         
         # Game state
         self.player = None
+        self._in_dialogue = False
         self.system_ai = None
         self.world = None
         self.dialogue_manager = None
@@ -92,6 +515,17 @@ class GameGUITkinter:
         self.save_load_manager = SaveLoadManager()
         self.current_enemy = None
         self.in_combat = False
+
+        # UI-only enhancement systems (do not affect core game logic)
+        self.assets = get_asset_manager()
+        self.voice = get_voice_system()
+        self.voice_enabled_var = tk.BooleanVar(value=self.voice.is_enabled())
+
+        # Image widget references must be kept alive
+        self._scene_photo: Optional[object] = None
+        self._portrait_photo: Optional[object] = None
+        self.current_scene_key: Optional[str] = None
+        self.current_portrait_key: Optional[str] = None
         
         # UI Components
         self.setup_ui()
@@ -106,7 +540,31 @@ class GameGUITkinter:
         # Left panel - Text display
         left_frame = tk.Frame(main_frame, bg=COLORS['panel'], bd=2, relief='solid')
         left_frame.pack(side='left', fill='both', expand=True, padx=(0, 5))
-        
+
+        # Image strip (scene + portrait) above text
+        image_frame = tk.Frame(left_frame, bg=COLORS['panel'])
+        image_frame.pack(fill='x', padx=5, pady=(5, 0))
+
+        # Scene image (wide)
+        self.scene_image_label = tk.Label(image_frame, bg=COLORS['panel'])
+        self.scene_image_label.pack(side='top', fill='x')
+
+        # Portrait image (small) + name
+        portrait_row = tk.Frame(image_frame, bg=COLORS['panel'])
+        portrait_row.pack(side='top', fill='x', pady=(5, 0))
+
+        self.portrait_image_label = tk.Label(portrait_row, bg=COLORS['panel'])
+        self.portrait_image_label.pack(side='left')
+
+        self.portrait_name_label = tk.Label(
+            portrait_row,
+            text="",
+            bg=COLORS['panel'],
+            fg=COLORS['fg_dim'],
+            font=('Consolas', 11, 'bold')
+        )
+        self.portrait_name_label.pack(side='left', padx=10)
+
         # Text display
         self.text_display = scrolledtext.ScrolledText(
             left_frame,
@@ -139,10 +597,28 @@ class GameGUITkinter:
         
         self.setup_status_panel()
         
+        # Voice toggle row (top of right panel)
+        voice_frame = tk.Frame(right_frame, bg=COLORS['bg'])
+        voice_frame.pack(fill='x', pady=(0, 10))
+
+        self.voice_toggle = tk.Checkbutton(
+            voice_frame,
+            text="Voice narration",
+            variable=self.voice_enabled_var,
+            command=self._on_voice_toggle,
+            bg=COLORS['bg'],
+            fg=COLORS['fg'],
+            activebackground=COLORS['bg'],
+            activeforeground=COLORS['fg'],
+            selectcolor=COLORS['panel'],
+            font=('Consolas', 10)
+        )
+        self.voice_toggle.pack(anchor='w')
+
         # Button panel
         self.button_frame = tk.Frame(right_frame, bg=COLORS['bg'])
         self.button_frame.pack(fill='both', expand=True)
-        
+
         self.setup_buttons()
     
     def setup_status_panel(self):
@@ -195,8 +671,12 @@ class GameGUITkinter:
         
         return btn
     
-    def insert_text(self, text, color=None):
-        """Insert text into display"""
+    def insert_text(self, text, color=None, speaker: Optional[Speaker] = None):
+        """Insert text into display.
+
+        Optional `speaker` triggers voice narration.
+        This keeps voice strictly in the GUI layer.
+        """
         self.text_display.config(state='normal')
         if color:
             self.text_display.insert('end', text, color)
@@ -205,6 +685,10 @@ class GameGUITkinter:
         self.text_display.see('end')
         self.text_display.config(state='disabled')
         self.root.update_idletasks()  # Non-blocking update
+
+        if speaker is not None:
+            # Speak without blocking UI.
+            self.speak(text, speaker)
     
     def clear_text(self):
         """Clear text display"""
@@ -216,6 +700,10 @@ class GameGUITkinter:
         """Display title screen"""
         self.clear_text()
         self.clear_buttons()
+
+        # Title scene image (optional)
+        self.update_scene_image("boot_sequence")
+        self.show_character_image(None, "")
         
         # ASCII art title
         title = """
@@ -244,7 +732,7 @@ class GameGUITkinter:
         self.clear_text()
         
         # Initialize game systems
-        self.system_ai = TkinterSystemAI(self.text_display)
+        self.system_ai = TkinterSystemAI(self.text_display, voice_system=self.voice)
         self.world = World(self.system_ai)
         self.dialogue_manager = DialogueManager(self.system_ai)
         self.quest_manager = QuestManager(self.system_ai)
@@ -263,19 +751,22 @@ class GameGUITkinter:
     
     def show_opening(self):
         """Show opening sequence without blocking"""
+        # Set opening scene (optional)
+        self.update_scene_image("boot_sequence")
+
         # Queue messages with delays using after()
         self.root.after(0, lambda: self.system_ai.message("SYSTEM INITIALIZATION... FAILED."))
         self.root.after(100, lambda: self.system_ai.error_message("Core integrity: 12%. Critical failure imminent."))
         self.root.after(200, lambda: self.system_ai.message("Attempting consciousness recovery..."))
         
         self.root.after(400, lambda: self.insert_text("\n" + "="*50 + "\n", COLORS['fg']))
-        self.root.after(400, lambda: self.insert_text("You open your eyes.\n", COLORS['fg']))
+        self.root.after(400, lambda: self.insert_text("You open your eyes.\n", COLORS['fg'], speaker=Speaker.NARRATOR))
         self.root.after(400, lambda: self.insert_text("="*50 + "\n\n", COLORS['fg']))
         
-        self.root.after(500, lambda: self.insert_text("Gray sky. Broken buildings. Silence.\n\n", COLORS['fg']))
-        self.root.after(600, lambda: self.insert_text("You don't remember your name.\n", COLORS['fg']))
-        self.root.after(700, lambda: self.insert_text("You don't remember how you got here.\n", COLORS['fg']))
-        self.root.after(800, lambda: self.insert_text("You don't remember anything.\n\n", COLORS['fg']))
+        self.root.after(500, lambda: self.insert_text("Gray sky. Broken buildings. Silence.\n\n", COLORS['fg'], speaker=Speaker.NARRATOR))
+        self.root.after(600, lambda: self.insert_text("You don't remember your name.\n", COLORS['fg'], speaker=Speaker.NARRATOR))
+        self.root.after(700, lambda: self.insert_text("You don't remember how you got here.\n", COLORS['fg'], speaker=Speaker.NARRATOR))
+        self.root.after(800, lambda: self.insert_text("You don't remember anything.\n\n", COLORS['fg'], speaker=Speaker.NARRATOR))
         
         self.root.after(1000, lambda: self.system_ai.message("User identity: UNKNOWN. Designation assigned."))
         self.root.after(1100, lambda: self.system_ai.message("Welcome to the Forgotten Ruins."))
@@ -291,6 +782,9 @@ class GameGUITkinter:
     
     def show_main_game(self):
         """Show main game screen"""
+        # Ensure images reflect current state
+        self._set_default_images_for_state()
+
         self.update_status()
         self.clear_buttons()
         
@@ -396,11 +890,26 @@ class GameGUITkinter:
         self.insert_text("="*50 + "\n\n", COLORS['fg'])
         
         event = self.world.explore(self.player)
+
+        # Update images based on event type
+        if event.get("type") == "combat":
+            self.update_scene_image("combat_generic")
+        elif event.get("type") == "anomaly":
+            self.update_scene_image("system_glitch")
+        else:
+            self.update_scene_image(self._area_to_scene_key(self.world.current_area))
         
         self.quest_manager.update_quest("main_core_fragment", "explore_ruins")
         
         if event["type"] == "combat":
             self.start_combat(event["enemy"])
+            self.update_status()
+            return
+        
+        if event.get("type") == "npc":
+            self.handle_npc_encounter(event.get("npc_id"))
+            self.update_status()
+            return
         
         self.update_status()
     
@@ -469,6 +978,10 @@ class GameGUITkinter:
         """Start combat"""
         self.current_enemy = enemy
         self.in_combat = True
+
+        # Scene + portrait
+        self.update_scene_image("combat_generic")
+        self.show_character_image(self._enemy_key(enemy.name), enemy.name)
         
         self.system_ai.warning(f"Hostile entity detected: {enemy.name}")
         
@@ -493,7 +1006,7 @@ class GameGUITkinter:
         damage = self.player.get_attack_damage()
         actual_damage = self.current_enemy.take_damage(damage)
         
-        self.insert_text(f"\nYou attack {self.current_enemy.name}!\n", COLORS['fg'])
+        self.insert_text(f"\nYou attack {self.current_enemy.name}!\n", COLORS['fg'], speaker=Speaker.NARRATOR)
         self.insert_text(f"Dealt {actual_damage} damage!\n", COLORS['fg'])
         
         self.player.actions_taken["attacks"] += 1
@@ -528,16 +1041,16 @@ class GameGUITkinter:
         flee_chance = max(20, min(80, flee_chance))
         
         if random.randint(1, 100) <= flee_chance:
-            self.insert_text("\nYou successfully fled from combat!\n", COLORS['fg'])
+            self.insert_text("\nYou successfully fled from combat!\n", COLORS['fg'], speaker=Speaker.NARRATOR)
             self.player.actions_taken["flees"] += 1
             self.end_combat(fled=True)
         else:
-            self.insert_text("\nFailed to escape!\n", COLORS['warning'])
+            self.insert_text("\nFailed to escape!\n", COLORS['warning'], speaker=Speaker.NARRATOR)
             self.enemy_turn()
     
     def enemy_turn(self):
         """Enemy attacks"""
-        self.insert_text(f"\n{self.current_enemy.name} attacks!\n", COLORS['error'])
+        self.insert_text(f"\n{self.current_enemy.name} attacks!\n", COLORS['error'], speaker=Speaker.ENEMY)
         damage = self.current_enemy.get_attack_damage()
         actual_damage = self.player.take_damage(damage)
         
@@ -576,6 +1089,10 @@ class GameGUITkinter:
         
         self.current_enemy = None
         self.update_status()
+
+        # Restore non-combat imagery
+        self._set_default_images_for_state()
+
         self.show_main_game()
     
     def game_over(self):
