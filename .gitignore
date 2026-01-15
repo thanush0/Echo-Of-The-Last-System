@@ -62,6 +62,7 @@ virtualenv/
 adventure_game/saves/*.json
 adventure_game/saves/*.sav
 adventure_game/saves/*.dat
+saves/
 
 # Logs and debugging
 *.log
